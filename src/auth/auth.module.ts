@@ -7,6 +7,7 @@ import {configModule} from "../configure.root";
 import {PassportModule} from "@nestjs/passport";
 import {UserModule} from "../user/user.module";
 import {TokenModule} from 'src/token/token.module'
+import {UserService} from "../user/user.service";
 
 @Module({
   imports: [
