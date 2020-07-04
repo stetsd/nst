@@ -7,7 +7,7 @@ import {configModule} from "../configure.root";
 import {PassportModule} from "@nestjs/passport";
 import {UserModule} from "../user/user.module";
 import {TokenModule} from 'src/token/token.module'
-import {UserService} from "../user/user.service";
+import {MailModule} from "src/mail/mail.module";
 
 @Module({
   imports: [
@@ -19,6 +19,7 @@ import {UserService} from "../user/user.service";
         secret: process.env.JWT_SECRET,
         signOptions: { expiresIn: '1d' },
       }),
+      MailModule,
   ],
   providers: [AuthService, JwtStrategy],
   controllers: [AuthController]
