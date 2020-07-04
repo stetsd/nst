@@ -1,5 +1,8 @@
-import {Injectable, UnauthorizedException, BadRequestException} from '@nestjs/common';
+import {Injectable, UnauthorizedException, BadRequestException, MethodNotAllowedException} from '@nestjs/common';
 import {JwtService} from "@nestjs/jwt";
+import * as bcrypt from 'bcrypt';
+import * as _ from 'lodash';
+import * as moment from 'moment';
 import {UserService} from "../user/user.service";
 import {TokenService} from "../token/token.service";
 import {CreateUserDto} from "../user/dto/create-user.dto";
@@ -7,10 +10,14 @@ import {SignOptions} from "jsonwebtoken";
 import {CreateUserTokenDto} from "../token/dto/create-user-token.dto";
 import {roleEnum} from "../user/enums/role.enum";
 import {IUser} from "../user/interfaces/user.interface";
-import moment from "moment";
 import {ConfigService} from "@nestjs/config";
 import {MailService} from "../mail/mail.service";
 import {statusEnum} from 'src/user/enums/status.enum';
+import { SignInDto } from './dto/signin.dto';
+import { ITokenPayload } from './interfaces/token-payload.interface';
+import { IReadableUser } from 'src/user/interfaces/readable-user.interface';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { userSensitiveFieldsEnum } from 'src/user/enums/protected-fields.enum';
 
 @Injectable()
 export class AuthService {
@@ -32,8 +39,43 @@ export class AuthService {
         return true
     }
 
-    signIn(email, password) {
+    async signIn({ email, password }: SignInDto): Promise<IReadableUser> {
+        const user = await (await this.userService.findByEmail(email));
 
+        if (user && (await bcrypt.compare(password, user.password))) {
+            if (user.status !== statusEnum.active) {
+                throw new MethodNotAllowedException();
+            }
+            const tokenPayload: ITokenPayload = {
+                _id: user._id,
+                status: user.status,
+                roles: user.roles,
+            };
+            const token = await this.generateToken(tokenPayload);
+            const expireAt = moment()
+                .add(1, 'day')
+                .toISOString();
+
+            await this.saveToken({
+                token,
+                expireAt,
+                uId: user._id,
+            });
+
+            const readableUser = user.toObject() as IReadableUser;
+            readableUser.accessToken = token;
+
+            return _.omit<any>(readableUser, Object.values(userSensitiveFieldsEnum)) as IReadableUser;
+        }
+        throw new BadRequestException('Invalid credentials');
+    }
+
+    async changePassword(changePasswordDto: ChangePasswordDto): Promise<boolean> {
+        const password = await this.userService.hashPassword(changePasswordDto.password);
+
+        await this.userService.update(changePasswordDto._id, { password });
+        await this.tokenService.deleteAll(changePasswordDto._id);
+        return true;
     }
 
     async confirm(token: string): Promise<IUser> {
@@ -69,21 +111,21 @@ export class AuthService {
             from: this.configService.get<string>('FROM_EMAIL'),
             to: user.email,
             subject: 'Verify User',
-            text: `
+            html: `
                 <h3>Hello ${user.firstName}</h3>
                 <p>Please use this <a href="${confirmLink}">Link</a> to confirm your account</p>
             `,
         });
     }
 
-    private async generateToken(data, options?: SignOptions): Promise<string> {
+    private async generateToken(data: ITokenPayload, options?: SignOptions): Promise<string> {
         return this.jwtService.sign(data, options)
     }
 
     private async verifyToken(token): Promise<any> {
         try {
 
-          const data = this.jwtService.verify(token);
+          const data = this.jwtService.verify(token) as ITokenPayload;
           const tokenExists = await this.tokenService.exists(data._id, token);
 
           if (tokenExists) {
